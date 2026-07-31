@@ -1015,6 +1015,7 @@ const getCompletionAISDK = async (
 
   let results;
   let streamError;
+  let stream_usage;
   if (rest.streamCallback) {
     delete body.streamCallback;
     body.onError = ({ error }) => {
@@ -1026,6 +1027,9 @@ const getCompletionAISDK = async (
       );
       streamError = error;
       rest.streamCallback(showMsg);
+    };
+    body.onFinish = (u) => {
+      stream_usage = u?.totalUsage;
     };
     const results1 = await streamText(body);
     for await (const textPart of results1.textStream) {
@@ -1050,7 +1054,7 @@ const getCompletionAISDK = async (
   if (appendToChat && chat) {
     chat.push(...results.response.messages);
   }
-  console.log("results", results);
+  //console.log("results", results);
 
   if (debugCollector) {
     debugCollector.response = results;
@@ -1066,7 +1070,7 @@ const getCompletionAISDK = async (
     });
   if (allToolCalls.length) {
     return {
-      total_usage: results.totalUsage,
+      total_usage: stream_usage || results.totalUsage,
       tool_calls: allToolCalls,
       content: await results.text,
       messages: (await results.response).messages,
@@ -1082,7 +1086,7 @@ const getCompletionAISDK = async (
     };
   } else if (respond_object) {
     return {
-      total_usage: results.totalUsage,
+      total_usage: stream_usage || results.totalUsage,
       content: await results.text,
       ai_sdk: true,
       messages: (await results.response).messages,
