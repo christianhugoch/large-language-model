@@ -886,6 +886,7 @@ const getCompletionAISDK = async (
     api_key,
     endpoint,
     ephemeralCacheControl,
+    respond_object,
     ...rest
   },
 ) => {
@@ -1049,6 +1050,7 @@ const getCompletionAISDK = async (
   if (appendToChat && chat) {
     chat.push(...results.response.messages);
   }
+  console.log("results", results);
 
   if (debugCollector) {
     debugCollector.response = results;
@@ -1064,6 +1066,7 @@ const getCompletionAISDK = async (
     });
   if (allToolCalls.length) {
     return {
+      total_usage: results.totalUsage,
       tool_calls: allToolCalls,
       content: await results.text,
       messages: (await results.response).messages,
@@ -1076,6 +1079,13 @@ const getCompletionAISDK = async (
           tool_call_id: tc.toolCallId,
         }));
       },
+    };
+  } else if (respond_object) {
+    return {
+      total_usage: results.totalUsage,
+      content: await results.text,
+      ai_sdk: true,
+      messages: (await results.response).messages,
     };
   } else return results.text;
 };
