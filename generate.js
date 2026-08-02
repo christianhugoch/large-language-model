@@ -342,8 +342,16 @@ const toolResponse = async (
   let chat = opts.chat;
   let result = opts.prompt;
   //console.log("chat", JSON.stringify(chat, null, 2));
+  // "OpenAI-compatible API" (e.g. Z.ai/GLM, OpenRouter) and "Local Ollama"
+  // share the exact same chat-completions code path as "OpenAI" in
+  // getCompletion(), so they must use the identical tool-result message
+  // format. Without these cases the call fell through to the empty default
+  // and the tool result was silently dropped, leaving every tool_call
+  // unanswered and trapping the agent in an infinite retry loop.
   switch (opts.backend || backend) {
     case "OpenAI":
+    case "OpenAI-compatible API":
+    case "Local Ollama":
       {
         let tool_call_chat, tool_call;
         if (!((opts.tool_call_id && opts.tool_name) || opts.tool_call)) {
@@ -439,8 +447,12 @@ const addImageMesssage = async (
   let result = opts.prompt;
   //console.log("chat", JSON.stringify(chat, null, 2));
   let imageurl = opts.prompt;
+  // Same OpenAI-compatible backends as in toolResponse(): they all use the
+  // OpenAI chat-completions message format (see getCompletion()).
   switch (opts.backend || backend) {
     case "OpenAI":
+    case "OpenAI-compatible API":
+    case "Local Ollama":
       {
         const new_chat_item = responses_api
           ? {
