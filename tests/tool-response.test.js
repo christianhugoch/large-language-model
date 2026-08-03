@@ -20,7 +20,7 @@
  * object gets pushed onto the supplied chat array.
  */
 
-const { describe, it, expect } = require("@jest/globals");
+const { describe, it, expect, jest } = require("@saltcorn/db-common/test_expect");
 
 jest.mock("@saltcorn/data/db", () => ({
   connectObj: { default_schema: "public" },
