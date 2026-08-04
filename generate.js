@@ -753,6 +753,24 @@ const getAiSdkModelWithVision = (cfg, isEmbedding) => {
   throw new Error("No vision capable model present");
 };
 
+getAiSdkModelName = ({ config, alt_config, userCfg }, isEmbedding) => {
+  const use_config = alt_config
+    ? config.alt_aisdk_configs?.find?.((acfg) => acfg.name === alt_config) ||
+      config
+    : config;
+
+  const use_provider = use_config.alt_provider || use_config.provider;
+
+  const model_name = isEmbedding
+    ? userCfg.embed_model ||
+      userCfg.model ||
+      config.embed_model ||
+      "text-embedding-3-small"
+    : userCfg.model || use_config.model;
+
+  return model_name;
+};
+
 const getAiSdkModel = ({ config, alt_config, userCfg }, isEmbedding) => {
   const use_config = alt_config
     ? config.alt_aisdk_configs?.find?.((acfg) => acfg.name === alt_config) ||
@@ -907,7 +925,12 @@ const getCompletionAISDK = async (
   },
 ) => {
   const { apiKey, model, provider, temperature } = config;
-  const use_model_name = rest.model || model;
+
+  const use_model_name = getAiSdkModelName({
+    config,
+    alt_config: rest.alt_config,
+    userCfg: rest,
+  });
   const hasImage =
     chatsHaveImage(chat) ||
     (Array.isArray(prompt) && prompt.some((c) => c.type === "image"));
@@ -1009,9 +1032,7 @@ const getCompletionAISDK = async (
     typeof temperature !== "undefined"
   ) {
     const str_or_num =
-      typeof rest.temperature !== "undefined"
-        ? rest.temperature
-        : temperature;
+      typeof rest.temperature !== "undefined" ? rest.temperature : temperature;
     body.temperature = +str_or_num;
   } else {
     body.temperature = 0.7;
@@ -1176,9 +1197,7 @@ const getCompletionOpenAICompatible = async (
     typeof temperature !== "undefined"
   ) {
     const str_or_num =
-      typeof rest.temperature !== "undefined"
-        ? rest.temperature
-        : temperature;
+      typeof rest.temperature !== "undefined" ? rest.temperature : temperature;
     body.temperature = +str_or_num;
   } else {
     body.temperature = 0.7;
