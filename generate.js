@@ -698,61 +698,6 @@ const aiSdkModelHasVision = (provider, model_name, config) => {
   return true;
 };
 
-const getAiSdkModelWithVision = (cfg, isEmbedding) => {
-  const use_config = cfg.alt_config
-    ? cfg.config.alt_aisdk_configs?.find?.(
-        (acfg) => acfg.name === cfg.alt_config,
-      ) || cfg.config
-    : cfg.config;
-
-  const use_provider = use_config.alt_provider || use_config.provider;
-
-  const model_name = isEmbedding
-    ? cfg.userCfg.embed_model ||
-      cfg.userCfg.model ||
-      cfg.config.embed_model ||
-      "text-embedding-3-small"
-    : cfg.userCfg.model || use_config.model;
-
-  // does chosen model have vision?
-  if (aiSdkModelHasVision(use_provider, model_name, use_config))
-    return getAiSdkModel(cfg, isEmbedding);
-
-  // no. order configs and use first with vision
-  const configOpts = [
-    //userCfg
-    /* CANNOT CURRENTLY OVERWRITE PROVIDER
-    
-    ...(cfg.userCfg.model
-      ? [
-          {
-            use_provider: cfg.config.provider,
-            model_name: cfg.userCfg.model,
-            config: cfg.config,
-          },
-        ]
-      : []), */
-    //main
-    {
-      use_provider: cfg.config.provider,
-      model_name: cfg.config.model,
-      config: cfg.config,
-      userCfg: {},
-    },
-    ...cfg.config.alt_aisdk_configs?.map((co) => ({
-      provider_name: co.alt_provider,
-      model_name: co.model,
-      config: co,
-      userCfg: {},
-    })),
-  ];
-  const use_cfg = configOpts.find((co) =>
-    aiSdkModelHasVision(co.use_provider, co.model_name, co),
-  );
-  if (use_cfg) return getAiSdkModel(use_cfg);
-  throw new Error("No vision capable model present");
-};
-
 getAiSdkModelName = ({ config, alt_config, userCfg }, isEmbedding) => {
   const use_config = alt_config
     ? config.alt_aisdk_configs?.find?.((acfg) => acfg.name === alt_config) ||
@@ -907,6 +852,30 @@ const chatHasImage = (chat) =>
 
 const chatsHaveImage = (chats) => chats.some(chatHasImage);
 
+// The order in which configurations are tried. The chosen configuration is
+// first; if it fails we fall back to the main configuration (unless that was
+// the chosen one) and then to each alternative configuration in turn.
+// `null` denotes the main configuration.
+const aiSdkConfigOrder = (config, chosen) => {
+  const altNames = (config.alt_aisdk_configs || [])
+    .map((acfg) => acfg?.name)
+    .filter(Boolean);
+  const chosenName = chosen && altNames.includes(chosen) ? chosen : null;
+  return chosenName
+    ? [chosenName, null, ...altNames.filter((n) => n !== chosenName)]
+    : [null, ...altNames];
+};
+
+const streamErrorMessage = (error) => {
+  const errMsg = error?.message;
+  return (
+    errMsg?.replace?.(
+      "Last error: Overloaded. https://docs.claude.com/en/api/errors",
+      "The Claude API is temporarily overloaded",
+    ) || errMsg
+  );
+};
+
 const getCompletionAISDK = async (
   config,
   {
@@ -926,35 +895,54 @@ const getCompletionAISDK = async (
 ) => {
   const { apiKey, model, provider, temperature } = config;
 
-  const use_model_name = getAiSdkModelName({
-    config,
-    alt_config: rest.alt_config,
-    userCfg: rest,
-  });
   const hasImage =
     chatsHaveImage(chat) ||
     (Array.isArray(prompt) && prompt.some((c) => c.type === "image"));
-  let model_obj = hasImage
-    ? getAiSdkModelWithVision({
-        config,
-        alt_config: rest.alt_config,
-        userCfg: rest,
-      })
-    : getAiSdkModel({
-        config,
-        alt_config: rest.alt_config,
-        userCfg: rest,
-      });
-  const use_config = rest.alt_config
-    ? config.alt_aisdk_configs?.find?.(
-        (acfg) => acfg.name === rest.alt_config,
-      ) || config
-    : config;
-  const use_provider = use_config.alt_provider || config.provider;
-  const reasoningEffort =
-    typeof reasoning_effort !== "undefined"
-      ? reasoning_effort
-      : use_config.reasoning_effort;
+
+  const resolveConfig = (altName) =>
+    altName
+      ? config.alt_aisdk_configs?.find?.((acfg) => acfg.name === altName) ||
+        config
+      : config;
+
+  // The configuration chosen by the caller is tried first, with the caller's
+  // overrides (model, api key) applied. Fallback configurations are used as
+  // configured - the caller's model name will not be valid for them.
+  let candidates = aiSdkConfigOrder(config, rest.alt_config).map(
+    (altName, ix) => ({ altName, userCfg: ix === 0 ? rest : {} }),
+  );
+
+  if (hasImage) {
+    candidates = candidates.filter(({ altName, userCfg }) => {
+      const cfg = resolveConfig(altName);
+      return aiSdkModelHasVision(
+        cfg.alt_provider || config.provider,
+        getAiSdkModelName({ config, alt_config: altName, userCfg }),
+        cfg,
+      );
+    });
+    if (!candidates.length) throw new Error("No vision capable model present");
+  }
+
+  // With no fallback configuration available we leave retrying to the AI SDK
+  const canFallback = candidates.length > 1;
+  const cfgRetries =
+    typeof rest.num_retries !== "undefined"
+      ? rest.num_retries
+      : config.num_retries;
+  const nRetries =
+    cfgRetries === null ||
+    cfgRetries === "" ||
+    typeof cfgRetries === "undefined"
+      ? candidates.length - 1
+      : +cfgRetries;
+  const nAttempts = canFallback
+    ? Math.max(1, 1 + (Number.isNaN(nRetries) ? 0 : nRetries))
+    : 1;
+  const attempts = Array.from(
+    { length: nAttempts },
+    (_x, ix) => candidates[ix % candidates.length],
+  );
 
   const modifyChat = (chat) => {
     const f = (c) => {
@@ -972,159 +960,237 @@ const getCompletionAISDK = async (
   };
   const newChat = appendToChat ? chat : chat.map(modifyChat);
 
-  const body = {
-    ...rest,
-    model: model_obj,
-    allowSystemInMessages: true,
-    messages: [
-      ...((!systemPrompt && newChat?.[0]?.role == "system") || rest.system
-        ? []
-        : [
-            {
-              role: "system",
-              content: systemPrompt || "You are a helpful assistant.",
-            },
-          ]),
-      ...newChat,
-      ...(prompt ? [{ role: "user", content: prompt }] : []),
-    ],
-  };
+  const messages = [
+    ...((!systemPrompt && newChat?.[0]?.role == "system") || rest.system
+      ? []
+      : [
+          {
+            role: "system",
+            content: systemPrompt || "You are a helpful assistant.",
+          },
+        ]),
+    ...newChat,
+    ...(prompt ? [{ role: "user", content: prompt }] : []),
+  ];
   if (appendToChat && chat && prompt) {
     chat.push({ role: "user", content: prompt });
   }
 
-  if (reasoningEffort) {
-    if (use_provider === "OpenAI" || use_provider === "Z.ai") {
+  // The request body is rebuilt for each attempt, as everything that depends
+  // on the provider (model object, provider options, tool schemas) changes
+  // when we fall back to a different configuration.
+  const buildBody = ({ altName, userCfg }) => {
+    const use_config = resolveConfig(altName);
+    const use_provider = use_config.alt_provider || config.provider;
+    const use_model_name = getAiSdkModelName({
+      config,
+      alt_config: altName,
+      userCfg,
+    });
+    const model_obj = getAiSdkModel({ config, alt_config: altName, userCfg });
+    const reasoningEffort =
+      typeof reasoning_effort !== "undefined"
+        ? reasoning_effort
+        : use_config.reasoning_effort;
+
+    const body = {
+      ...rest,
+      model: model_obj,
+      allowSystemInMessages: true,
+      messages: [...messages],
+    };
+    delete body.num_retries;
+    // we do our own retrying across configurations
+    if (canFallback && typeof rest.maxRetries === "undefined")
+      body.maxRetries = 0;
+
+    if (reasoningEffort) {
+      if (use_provider === "OpenAI" || use_provider === "Z.ai") {
+        body.providerOptions = {
+          ...body.providerOptions,
+          openai: {
+            ...body.providerOptions?.openai,
+            reasoningEffort,
+          },
+        };
+      } else if (use_provider === "Anthropic") {
+        body.providerOptions = {
+          ...body.providerOptions,
+          anthropic: {
+            ...body.providerOptions?.anthropic,
+            effort: reasoningEffort,
+          },
+        };
+      }
+    }
+    if (use_config.max_tokens)
       body.providerOptions = {
         ...body.providerOptions,
         openai: {
           ...body.providerOptions?.openai,
-          reasoningEffort,
+          maxCompletionTokens: use_config.max_tokens,
         },
       };
-    } else if (use_provider === "Anthropic") {
-      body.providerOptions = {
-        ...body.providerOptions,
-        anthropic: {
-          ...body.providerOptions?.anthropic,
-          effort: reasoningEffort,
+    if (
+      ephemeralCacheControl &&
+      use_provider === "Anthropic" &&
+      body.messages.length
+    ) {
+      const lastIx = body.messages.length - 1;
+      body.messages[lastIx] = {
+        ...body.messages[lastIx],
+        providerOptions: {
+          anthropic: { cacheControl: { type: "ephemeral" } },
         },
       };
     }
-  }
-  if (use_config.max_tokens)
-    body.providerOptions = {
-      ...body.providerOptions,
-      openai: {
-        ...body.providerOptions?.openai,
-        maxCompletionTokens: use_config.max_tokens,
-      },
-    };
-  if (
-    ephemeralCacheControl &&
-    ((rest.alt_config && use_config.alt_provider === "Anthropic") ||
-      config.provider === "Anthropic") &&
-    body.messages.length
-  )
-    body.messages[body.messages.length - 1].providerOptions = {
-      anthropic: { cacheControl: { type: "ephemeral" } },
-    };
 
-  if (NO_TEMP_MODELS.includes(use_model_name)) {
-    delete body.temperature;
-  } else if (rest.temperature === null) {
-    delete body.temperature;
-  } else if (
-    typeof rest.temperature !== "undefined" ||
-    typeof temperature !== "undefined"
-  ) {
-    const str_or_num =
-      typeof rest.temperature !== "undefined" ? rest.temperature : temperature;
-    body.temperature = +str_or_num;
-  } else {
-    body.temperature = 0.7;
-  }
-  if (body.tools) {
-    const prevTools = [...body.tools];
-    body.tools = {};
-    const isGoogle = use_config.provider === "Google";
-    prevTools.forEach((t) => {
-      const params = t.parameters || t.function.parameters;
-      body.tools[t.name || t.function.name] = tool({
-        description: t.description || t.function.description,
-        inputSchema: jsonSchema(
-          isGoogle ? sanitizeSchemaForGoogle(params) : params,
+    if (NO_TEMP_MODELS.includes(use_model_name)) {
+      delete body.temperature;
+    } else if (rest.temperature === null) {
+      delete body.temperature;
+    } else if (
+      typeof rest.temperature !== "undefined" ||
+      typeof temperature !== "undefined"
+    ) {
+      const str_or_num =
+        typeof rest.temperature !== "undefined"
+          ? rest.temperature
+          : temperature;
+      body.temperature = +str_or_num;
+    } else {
+      body.temperature = 0.7;
+    }
+    if (body.tools) {
+      const prevTools = [...body.tools];
+      body.tools = {};
+      const isGoogle = use_provider === "Google";
+      prevTools.forEach((t) => {
+        const params = t.parameters || t.function.parameters;
+        body.tools[t.name || t.function.name] = tool({
+          description: t.description || t.function.description,
+          inputSchema: jsonSchema(
+            isGoogle ? sanitizeSchemaForGoogle(params) : params,
+          ),
+        });
+      });
+    }
+
+    if (use_provider === "Google" && config.search_grounding) {
+      const googleProvider = createGoogleGenerativeAI({
+        apiKey: use_config.google_api_key || use_config.api_key,
+      });
+      if (!body.tools) body.tools = {};
+      body.tools.googleSearch = googleProvider.tools.googleSearch();
+    }
+
+    if (body.response_format?.type === "json_schema" && !body.output) {
+      body.output = Output.object({
+        schema: jsonSchema(
+          lockDownSchema(body.response_format.json_schema.schema),
         ),
       });
-    });
-  }
-
-  if (use_config.provider === "Google" && config.search_grounding) {
-    const googleProvider = createGoogleGenerativeAI({
-      apiKey: use_config.google_api_key,
-    });
-    if (!body.tools) body.tools = {};
-    body.tools.googleSearch = googleProvider.tools.googleSearch();
-  }
-
-  if (body.response_format?.type === "json_schema" && !body.output) {
-    body.output = Output.object({
-      schema: jsonSchema(
-        lockDownSchema(body.response_format.json_schema.schema),
-      ),
-    });
-    delete body.response_format;
-  }
-
-  const debugRequest = { ...body, model: use_model_name };
-  if (debugResult)
-    console.log("AI SDK request", JSON.stringify(debugRequest, null, 2));
-  getState().log(
-    6,
-    `AI SDK request`,
-    { tools: Object.keys(debugRequest.tools || {}), model: debugRequest.model },
-    JSON.stringify(debugRequest.messages, null, 2),
-  );
-  if (debugCollector) debugCollector.request = debugRequest;
-  const reqTimeStart = Date.now();
+      delete body.response_format;
+    }
+    return { body, use_model_name };
+  };
 
   let results;
-  let streamError;
   let stream_usage;
-  if (rest.streamCallback) {
-    delete body.streamCallback;
-    body.onError = ({ error }) => {
-      console.error("LLM AI SDK stream error", error);
-      const errMsg = error?.message;
-      const showMsg = errMsg.replace?.(
-        "Last error: Overloaded. https://docs.claude.com/en/api/errors",
-        "The Claude API is temporarily overloaded",
-      );
-      streamError = error;
-      rest.streamCallback(showMsg);
-    };
-    body.onFinish = (u) => {
-      stream_usage = u?.totalUsage;
-    };
-    const results1 = await streamText(body);
-    for await (const textPart of results1.textStream) {
-      rest.streamCallback(textPart);
-    }
+
+  for (let attemptIx = 0; attemptIx < attempts.length; attemptIx++) {
+    const isLastAttempt = attemptIx === attempts.length - 1;
+    const { altName } = attempts[attemptIx];
+    const reqTimeStart = Date.now();
+
+    // In streaming mode a failure is not thrown by streamText: it is reported
+    // to onError and the text stream simply ends. We can only safely retry if
+    // nothing has been streamed to the caller yet - otherwise a retry would
+    // duplicate the output that the user has already seen.
+    let streamedAny = false;
+    let errorSentToStream = false;
     try {
-      results = {
-        response: await results1.response,
-        text: await results1.text,
-        steps: await results1.steps,
-      };
+      // building the request can also fail, e.g. for a misconfigured provider
+      const { body, use_model_name } = buildBody(attempts[attemptIx]);
+
+      const debugRequest = { ...body, model: use_model_name };
+      if (debugResult)
+        console.log("AI SDK request", JSON.stringify(debugRequest, null, 2));
+      getState().log(
+        6,
+        `AI SDK request`,
+        {
+          tools: Object.keys(debugRequest.tools || {}),
+          model: debugRequest.model,
+          ...(attemptIx
+            ? { retry: attemptIx, configuration: altName || "main" }
+            : {}),
+        },
+        JSON.stringify(debugRequest.messages, null, 2),
+      );
+      if (debugCollector) debugCollector.request = debugRequest;
+
+      if (rest.streamCallback) {
+        delete body.streamCallback;
+        let streamError;
+        body.onError = ({ error }) => {
+          streamError = error;
+        };
+        body.onFinish = (u) => {
+          stream_usage = u?.totalUsage;
+        };
+        const results1 = await streamText(body);
+        for await (const textPart of results1.textStream) {
+          if (textPart) streamedAny = true;
+          rest.streamCallback(textPart);
+        }
+        if (streamError && !streamedAny) throw streamError;
+        if (streamError) {
+          console.error("LLM AI SDK stream error", streamError);
+          rest.streamCallback(streamErrorMessage(streamError));
+          errorSentToStream = true;
+        }
+        try {
+          results = {
+            response: await results1.response,
+            text: await results1.text,
+            steps: await results1.steps,
+          };
+        } catch (e) {
+          if (
+            e?.message ===
+              "No output generated. Check the stream for errors." &&
+            streamError
+          )
+            throw streamError;
+          else throw e;
+        }
+      } else results = await generateText(body);
+      if (debugCollector)
+        debugCollector.response_time_ms = Date.now() - reqTimeStart;
+      break;
     } catch (e) {
-      if (
-        e?.message === "No output generated. Check the stream for errors." &&
-        streamError
-      )
-        throw streamError;
-      else throw e;
+      const canRetry =
+        !isLastAttempt && !streamedAny && !rest.abortSignal?.aborted;
+      getState().log(
+        canRetry ? 4 : 2,
+        `AI SDK error with configuration ${altName || "main"}: ${e?.message}${
+          canRetry
+            ? `. Retrying with configuration ${
+                attempts[attemptIx + 1].altName || "main"
+              }`
+            : ""
+        }`,
+      );
+      if (!canRetry) {
+        if (rest.streamCallback && !errorSentToStream) {
+          console.error("LLM AI SDK stream error", e);
+          rest.streamCallback(streamErrorMessage(e));
+        }
+        throw e;
+      }
     }
-  } else results = await generateText(body);
+  }
 
   if (appendToChat && chat) {
     chat.push(...results.response.messages);
@@ -1133,7 +1199,6 @@ const getCompletionAISDK = async (
 
   if (debugCollector) {
     debugCollector.response = results;
-    debugCollector.response_time_ms = Date.now() - reqTimeStart;
   }
   const allToolCalls = (await results.steps).flatMap((step) => step.toolCalls);
   if (debugResult)

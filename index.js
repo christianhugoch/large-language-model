@@ -523,6 +523,15 @@ ${domReady(`
                 },
               },
               {
+                name: "num_retries",
+                label: "Retries",
+                type: "Integer",
+                sublabel:
+                  "Number of times to retry a failed inference request. If alternative configurations are set, each retry uses the next configuration in turn. Leave blank to try every configuration once.",
+                showIf: { backend: "AI SDK" },
+                attributes: { min: 0 },
+              },
+              {
                 name: "embed_model",
                 label: "Embedding model",
                 type: "String",
