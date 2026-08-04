@@ -750,10 +750,12 @@ ${domReady(`
                           OpenAI: OPENAI_MODELS,
                           "Z.ai": ["glm-5.2", "glm-5.1"],
                           Anthropic: [
+                            "claude-opus-5",
                             "claude-opus-4-8",
                             "claude-opus-4-7",
                             "claude-opus-4-6",
                             "claude-sonnet-4-6",
+                            "claude-sonnet-5",
                             "claude-haiku-4-5",
                           ],
                         },
