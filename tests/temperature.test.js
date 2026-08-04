@@ -1,3 +1,11 @@
+const {
+  describe,
+  test,
+  expect,
+  jest,
+  beforeEach,
+} = require("@saltcorn/db-common/test_expect");
+
 const mockGenerateText = jest.fn(async () => ({
   text: "ok",
   steps: [],
