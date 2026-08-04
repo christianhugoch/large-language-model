@@ -5,7 +5,14 @@ const Plugin = require("@saltcorn/data/models/plugin");
 const fs = require("fs");
 const path = require("path");
 const { mockReqRes } = require("@saltcorn/data/tests/mocks");
-const { afterAll, beforeAll, describe, it, expect } = require("@jest/globals");
+const {
+  afterAll,
+  beforeAll,
+  describe,
+  it,
+  expect,
+  jest,
+} = require("@saltcorn/db-common/test_expect");
 
 afterAll(require("@saltcorn/data/db").close);
 beforeAll(async () => {
