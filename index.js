@@ -30,6 +30,17 @@ const { interpolate } = require("@saltcorn/data/utils");
 const { getState } = require("@saltcorn/data/db/state");
 const { google } = require("googleapis");
 
+const reasoningEffortOptions = (providerField) => ({
+  calcOptions: [
+    providerField,
+    {
+      OpenAI: ["", "none", "minimal", "low", "medium", "high", "xhigh"],
+      "Z.ai": ["", "none", "minimal", "low", "medium", "high", "xhigh"],
+      Anthropic: ["", "low", "medium", "high", "max"],
+    },
+  ],
+});
+
 const configuration_workflow = () =>
   new Workflow({
     steps: [
@@ -244,6 +255,18 @@ ${domReady(`
                     },
                   ],
                 },
+              },
+              {
+                name: "reasoning_effort",
+                label: "Reasoning effort",
+                sublabel:
+                  "Optional. Leave blank for the provider default. Use none to disable reasoning on supported OpenAI and Z.ai models.",
+                type: "String",
+                showIf: {
+                  backend: "AI SDK",
+                  ai_sdk_provider: ["OpenAI", "Anthropic", "Z.ai"],
+                },
+                attributes: reasoningEffortOptions("ai_sdk_provider"),
               },
               {
                 name: "model",
@@ -734,6 +757,17 @@ ${domReady(`
                         },
                       ],
                     },
+                  },
+                  {
+                    name: "reasoning_effort",
+                    label: "Reasoning effort",
+                    sublabel:
+                      "Optional. Leave blank for the provider default.",
+                    type: "String",
+                    showIf: {
+                      alt_provider: ["OpenAI", "Anthropic", "Z.ai"],
+                    },
+                    attributes: reasoningEffortOptions("alt_provider"),
                   },
                   {
                     name: "model",
