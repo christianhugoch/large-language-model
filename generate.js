@@ -1012,7 +1012,14 @@ const getCompletionAISDK = async (
       };
     }
   }
-
+  if (use_config.max_tokens)
+    body.providerOptions = {
+      ...body.providerOptions,
+      openai: {
+        ...body.providerOptions?.openai,
+        maxCompletionTokens: use_config.max_tokens,
+      },
+    };
   if (
     ephemeralCacheControl &&
     ((rest.alt_config && use_config.alt_provider === "Anthropic") ||

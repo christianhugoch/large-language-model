@@ -307,6 +307,16 @@ ${domReady(`
                 },
               },
               {
+                name: "max_tokens",
+                label: "Max tokens",
+                type: "Integer",
+                sublabel: "Maximum number of output tokens",
+                showIf: {
+                  backend: "AI SDK",
+                  ai_sdk_provider: "OpenAI-compatible",
+                },
+              },
+              {
                 name: "has_vision",
                 label: "Has vision",
                 type: "Bool",
@@ -765,8 +775,7 @@ ${domReady(`
                   {
                     name: "reasoning_effort",
                     label: "Reasoning effort",
-                    sublabel:
-                      "Optional. Leave blank for the provider default.",
+                    sublabel: "Optional. Leave blank for the provider default.",
                     type: "String",
                     showIf: {
                       alt_provider: ["OpenAI", "Anthropic", "Z.ai"],
@@ -844,6 +853,15 @@ ${domReady(`
                     sublabel: "The model is vision-capable",
                     showIf: {
                       alt_provider: ["OpenRouter", "OpenAI-compatible"],
+                    },
+                  },
+                  {
+                    name: "max_tokens",
+                    label: "Max tokens",
+                    type: "Integer",
+                    sublabel: "Maximum number of output tokens",
+                    showIf: {
+                      alt_provider: "OpenAI-compatible",
                     },
                   },
                 ],
