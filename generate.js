@@ -1023,14 +1023,19 @@ const getCompletionAISDK = async (
         };
       }
     }
-    if (use_config.max_tokens)
-      body.providerOptions = {
-        ...body.providerOptions,
-        openai: {
-          ...body.providerOptions?.openai,
-          maxCompletionTokens: use_config.max_tokens,
-        },
-      };
+    if (use_config.max_tokens) {
+      if (use_provider === "Anthropic") {
+        body.maxOutputTokens = use_config.max_tokens;
+      } else {
+        body.providerOptions = {
+          ...body.providerOptions,
+          openai: {
+            ...body.providerOptions?.openai,
+            maxCompletionTokens: use_config.max_tokens,
+          },
+        };
+      }
+    }
     if (
       ephemeralCacheControl &&
       use_provider === "Anthropic" &&
