@@ -313,7 +313,7 @@ ${domReady(`
                 sublabel: "Maximum number of output tokens",
                 showIf: {
                   backend: "AI SDK",
-                  ai_sdk_provider: ["OpenAI-compatible", "Anthropic"],
+                  ai_sdk_provider: ["OpenAI-compatible", "Anthropic", "OpenRouter"],
                 },
               },
               {
@@ -870,7 +870,7 @@ ${domReady(`
                     type: "Integer",
                     sublabel: "Maximum number of output tokens",
                     showIf: {
-                      alt_provider: "OpenAI-compatible",
+                      alt_provider: ["OpenAI-compatible", "Anthropic", "OpenRouter"],
                     },
                   },
                 ],

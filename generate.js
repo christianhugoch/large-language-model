@@ -1024,7 +1024,7 @@ const getCompletionAISDK = async (
       }
     }
     if (use_config.max_tokens) {
-      if (use_provider === "Anthropic") {
+      if (use_provider === "Anthropic" || use_provider === "OpenRouter") {
         body.maxOutputTokens = use_config.max_tokens;
       } else {
         body.providerOptions = {
