@@ -1250,6 +1250,7 @@ const getCompletionOpenAICompatible = async (
     appendToChat,
     api_key,
     endpoint,
+    abortSignal,
     ...rest
   },
 ) => {
@@ -1405,6 +1406,7 @@ const getCompletionOpenAICompatible = async (
     method: "POST",
     headers,
     body: JSON.stringify(body),
+    signal: abortSignal,
   });
   let streamParts = [];
   let streamToolCalls = null;
